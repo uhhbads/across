@@ -241,6 +241,56 @@ async def api_delete_image(request: Request, folder: str = Form(None), filename:
     return {"ok": True}
 
 
+@router.post('/api/rename_image')
+async def api_rename_image(request: Request, folder: str = Form(None), old_name: str = Form(None), new_name: str = Form(None)):
+    # accept JSON or form
+    body = None
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if body and isinstance(body, dict):
+        old = body.get('old_name') or body.get('old') or old_name
+        new = body.get('new_name') or body.get('new') or new_name
+        folder_name = body.get('folder') or folder
+    else:
+        old = old_name
+        new = new_name
+        folder_name = folder
+
+    if not old or not new:
+        return {"ok": False, "error": "missing old or new name"}
+
+    src = images_dir / old if not folder_name else images_dir / folder_name / old
+    if not src.exists() or not src.is_file():
+        return {"ok": False, "error": "source not found"}
+
+    # Preserve extension if new name has none
+    new_path = Path(new)
+    if not new_path.suffix:
+        new = new + src.suffix
+
+    dst = images_dir / new if not folder_name else images_dir / folder_name / new
+    if dst.exists():
+        return {"ok": False, "error": "destination exists"}
+
+    try:
+        src.rename(dst)
+        # rename thumbnail if exists
+        try:
+            thumbs_dir = src.parent / 'thumbs'
+            if thumbs_dir.exists():
+                old_thumb = thumbs_dir / src.name
+                if old_thumb.exists():
+                    new_thumb = thumbs_dir / dst.name
+                    old_thumb.rename(new_thumb)
+        except Exception:
+            pass
+        return {"ok": True, "new_name": dst.name}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.post('/debug/echo')
 async def debug_echo(request: Request):
     # Return raw body, parsed JSON (if any), form data and headers to help debugging clients

@@ -78,4 +78,77 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(pre) pre.textContent = text
   }
 
+  // Image lightbox with rename
+  document.querySelectorAll('.img-link').forEach(link=>{
+    link.addEventListener('click', (e)=>{
+      e.preventDefault()
+      const full = link.dataset.full
+      const filename = link.dataset.filename
+      const folder = link.dataset.folder || ''
+      const figure = link.closest('figure')
+      openImageModal({full, filename, folder, figure})
+    })
+  })
+
+  function openImageModal({full, filename, folder, figure}){
+    let modal = document.getElementById('image-modal')
+    if(!modal){
+      modal = document.createElement('div')
+      modal.id = 'image-modal'
+      modal.innerHTML = `
+        <div class="modal-inner">
+          <div style="text-align:right"><button id="img-close">Close</button></div>
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            <img id="img-preview" src="" style="max-width:70vw;max-height:70vh;border-radius:6px" />
+            <div style="min-width:260px">
+              <h3 id="img-fname"></h3>
+              <form id="img-rename-form">
+                <label>Rename: <input name="new_name" id="img-new-name" placeholder="new-name.jpg"></label>
+                <button type="submit">Rename</button>
+              </form>
+              <div id="img-rename-msg" style="color:green;margin-top:8px"></div>
+            </div>
+          </div>
+        </div>`
+      document.body.appendChild(modal)
+      document.getElementById('img-close').addEventListener('click', ()=> modal.remove())
+      // handle rename submit
+      document.getElementById('img-rename-form').addEventListener('submit', async (ev)=>{
+        ev.preventDefault()
+        const newName = document.getElementById('img-new-name').value.trim()
+        if(!newName) return alert('Enter a new filename')
+        const oldName = modal.dataset.filename
+        const folderVal = modal.dataset.folder || ''
+        const res = await jsonPost('/api/rename_image', {folder: folderVal || null, old_name: oldName, new_name: newName})
+        if(res && res.ok){
+          document.getElementById('img-rename-msg').textContent = 'Renamed to '+res.new_name
+          // update thumbnail & data attributes in gallery
+          if(figure){
+            const imgEl = figure.querySelector('img')
+            if(imgEl){
+              // if thumbnail path contains name, replace it
+              const thumbSrc = imgEl.src
+              const updatedThumb = thumbSrc.replace(oldName, res.new_name)
+              imgEl.src = updatedThumb
+            }
+            const linkEl = figure.querySelector('.img-link')
+            if(linkEl){
+              linkEl.dataset.filename = res.new_name
+              linkEl.dataset.full = linkEl.dataset.full.replace(oldName, res.new_name)
+            }
+          }
+          modal.dataset.filename = res.new_name
+          document.getElementById('img-fname').textContent = res.new_name
+        }else{
+          alert('Rename failed: '+(res && res.error || 'unknown'))
+        }
+      })
+    }
+    modal.dataset.filename = filename
+    modal.dataset.folder = folder
+    document.getElementById('img-preview').src = full
+    document.getElementById('img-fname').textContent = filename
+    document.getElementById('img-new-name').value = filename
+  }
+
 })
