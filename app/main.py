@@ -17,6 +17,11 @@ images_dir = DATA_DIR / "images"
 images_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
 
+# Mount local static assets (CSS/JS)
+static_dir = BASE_DIR / "static"
+static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 # Templates
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
