@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import os
 
-app = FastAPI(title="Aperture - Image Dump")
+app = FastAPI(title="across")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
