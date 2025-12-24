@@ -6,6 +6,8 @@ import uuid
 import shutil
 import mimetypes
 import os
+import json
+import datetime
 from app.config import DATA_DIR
 
 # optional Pillow import for EXIF
@@ -88,6 +90,27 @@ async def upload_image(file: UploadFile = File(...), title: str = Form(None), fo
     with dest.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     # (No thumbnail generation) -- previews use full images scaled in the client
+    # Record upload time and initialize tags metadata
+    try:
+        tags_file = images_dir / 'tags.json'
+        data = {}
+        if tags_file.exists():
+            try:
+                data = json.loads(tags_file.read_text())
+            except Exception:
+                data = {}
+        rel = f"{folder}/{fname}" if folder else fname
+        entry = data.get(rel)
+        if not isinstance(entry, dict):
+            # migrate previous simple list entry to object
+            tags = entry if isinstance(entry, list) else []
+            data[rel] = {"tags": tags, "uploaded_at": datetime.datetime.utcnow().isoformat() + 'Z'}
+        else:
+            entry.setdefault('uploaded_at', datetime.datetime.utcnow().isoformat() + 'Z')
+            data[rel] = entry
+        tags_file.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
     if folder:
         return RedirectResponse(url=f"/gallery?folder={folder}", status_code=303)
     return RedirectResponse(url="/gallery", status_code=303)

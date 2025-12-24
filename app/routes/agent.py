@@ -231,7 +231,7 @@ def perform_action(action: dict):
         return res
 
     if intent == 'tag' or intent == 'tag_image':
-        # store tags in a tags.json in IMAGES_ROOT
+        # store tags in a tags.json in IMAGES_ROOT; support tagging by filename or by query
         tags_file = IMAGES_ROOT / 'tags.json'
         data = {}
         if tags_file.exists():
@@ -239,20 +239,57 @@ def perform_action(action: dict):
                 data = json.loads(tags_file.read_text())
             except Exception:
                 data = {}
-        query = action.get('query', '')
         tags = action.get('tags') or action.get('labels') or []
-        matches = find_images_by_query(query)
-        for rel in matches:
-            data.setdefault(rel, [])
+        # target by explicit filename
+        filename = action.get('filename') or action.get('file') or action.get('image')
+        folder = action.get('folder')
+        matched = []
+        if filename:
+            key = f"{folder}/{filename}" if folder else filename
+            # normalize key if file exists under images root
+            p = IMAGES_ROOT / key
+            if not p.exists():
+                # try to find file by name anywhere
+                found = None
+                for q in IMAGES_ROOT.rglob(filename):
+                    if q.is_file():
+                        found = q
+                        break
+                if found:
+                    key = str(found.relative_to(IMAGES_ROOT)).replace('\\', '/')
+            # ensure entry is object
+            entry = data.get(key)
+            if not isinstance(entry, dict):
+                entry_tags = entry if isinstance(entry, list) else []
+                data[key] = {"tags": entry_tags, "uploaded_at": None}
             for t in tags:
-                if t not in data[rel]:
-                    data[rel].append(t)
+                if t not in data[key].setdefault('tags', []):
+                    data[key]['tags'].append(t)
+            matched = [key]
+        else:
+            # tag by query
+            query = action.get('query', '')
+            matches = find_images_by_query(query)
+            for rel in matches:
+                entry = data.get(rel)
+                if not isinstance(entry, dict):
+                    entry_tags = entry if isinstance(entry, list) else []
+                    data[rel] = {"tags": entry_tags, "uploaded_at": None}
+                for t in tags:
+                    if t not in data[rel].setdefault('tags', []):
+                        data[rel]['tags'].append(t)
+            matched = matches
         try:
-            tags_file.write_text(json.dumps(data, indent=2))
+            tags_file.write_text(json.dumps(data, indent=2, ensure_ascii=False))
         except Exception:
             pass
-        res = {"ok": True, "tagged": len(matches), "tags": tags}
-        _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "tags", "previous": {}}})
+        # build result including upload timestamps if available
+        details = []
+        for k in matched:
+            entry = data.get(k, {})
+            details.append({"file": k, "tags": entry.get('tags', []), "uploaded_at": entry.get('uploaded_at')})
+        res = {"ok": True, "tagged": len(matched), "details": details}
+        _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "tags", "items": matched}})
         return res
 
     if intent == 'summarize' or intent == 'summary':
