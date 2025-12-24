@@ -8,6 +8,16 @@ import mimetypes
 import os
 from app.config import DATA_DIR
 
+# optional Pillow import for thumbnails/EXIF
+try:
+    from PIL import Image
+    from PIL.ExifTags import TAGS
+    _PIL_AVAILABLE = True
+except Exception:
+    Image = None
+    TAGS = {}
+    _PIL_AVAILABLE = False
+
 router = APIRouter()
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -29,7 +39,8 @@ async def gallery(request: Request, folder: str = None):
             if p.is_file():
                 mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
                 if mime.startswith("image/"):
-                    files.append({"name": p.name, "url": f"/images/{folder}/{p.name}"})
+                        thumb = f"/images/{folder}/thumbs/{p.name}"
+                        files.append({"name": p.name, "url": f"/images/{folder}/{p.name}", "thumb": thumb})
         files.sort(key=lambda x: x["name"], reverse=True)
         context.update({"images": files, "folder": folder})
         return templates.TemplateResponse("index.html", context)
@@ -67,6 +78,19 @@ async def upload_image(file: UploadFile = File(...), title: str = Form(None), fo
     dest = dest_dir / fname
     with dest.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    # create thumbnail if pillow available
+    try:
+        if _PIL_AVAILABLE:
+            thumbs_dir = dest_dir / "thumbs"
+            thumbs_dir.mkdir(parents=True, exist_ok=True)
+            thumb_path = thumbs_dir / fname
+            with Image.open(dest) as img:
+                img.thumbnail((480, 320))
+                # save in same format if possible
+                img.save(thumb_path)
+    except Exception:
+        pass
+
     if folder:
         return RedirectResponse(url=f"/gallery?folder={folder}", status_code=303)
     return RedirectResponse(url="/gallery", status_code=303)
@@ -116,3 +140,89 @@ async def delete_image(folder: str, filename: str = Form(...)):
         raise HTTPException(status_code=404, detail="Image not found")
     path.unlink()
     return RedirectResponse(url=f"/gallery?folder={folder}", status_code=303)
+
+
+def _read_exif(path: Path):
+    if not _PIL_AVAILABLE:
+        return {}
+    try:
+        with Image.open(path) as img:
+            info = img._getexif() or {}
+            out = {}
+            for tag, val in info.items():
+                name = TAGS.get(tag, tag)
+                out[name] = str(val)
+            return out
+    except Exception:
+        return {}
+
+
+@router.get('/api/image_exif')
+async def api_image_exif(folder: str = None, filename: str = None):
+    if not filename:
+        return {"exif": {}}
+    path = images_dir / filename if not folder else images_dir / folder / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return {"exif": _read_exif(path)}
+
+
+@router.post('/api/create_folder')
+async def api_create_folder(payload: dict = None, name: str = Form(None)):
+    # accept JSON body or form
+    folder_name = None
+    if payload and isinstance(payload, dict):
+        folder_name = payload.get('name')
+    if not folder_name:
+        folder_name = name
+    if not folder_name:
+        return {"ok": False, "error": "missing name"}
+    path = images_dir / folder_name.strip()
+    path.mkdir(parents=True, exist_ok=True)
+    return {"ok": True, "folder": folder_name}
+
+
+@router.post('/api/delete_folder')
+async def api_delete_folder(payload: dict = None, folder: str = Form(None)):
+    folder_name = None
+    if payload and isinstance(payload, dict):
+        folder_name = payload.get('folder')
+    if not folder_name:
+        folder_name = folder
+    if not folder_name:
+        return {"ok": False, "error": "missing folder"}
+    path = images_dir / folder_name
+    if not path.exists() or not path.is_dir():
+        return {"ok": False, "error": "not found"}
+    for p in path.iterdir():
+        if p.is_file():
+            p.unlink()
+        elif p.is_dir():
+            shutil.rmtree(p)
+    path.rmdir()
+    return {"ok": True}
+
+
+@router.post('/api/delete_image')
+async def api_delete_image(payload: dict = None, folder: str = Form(None), filename: str = Form(None)):
+    folder_name = None
+    file_name = None
+    if payload and isinstance(payload, dict):
+        folder_name = payload.get('folder')
+        file_name = payload.get('filename')
+    folder_name = folder_name or folder
+    file_name = file_name or filename
+    if not file_name:
+        return {"ok": False, "error": "missing filename"}
+    path = images_dir / file_name if not folder_name else images_dir / folder_name / file_name
+    if not path.exists() or not path.is_file():
+        return {"ok": False, "error": "not found"}
+    path.unlink()
+    # remove thumbnail if exists
+    try:
+        thumbs = path.parent / 'thumbs' / path.name
+        if thumbs.exists():
+            thumbs.unlink()
+    except Exception:
+        pass
+    return {"ok": True}

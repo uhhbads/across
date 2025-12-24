@@ -7,22 +7,25 @@
     <p>
       <a href="/upload?folder={{ folder }}">Upload to {{ folder }}</a>
     </p>
-    <form action="/gallery/{{ folder }}/rename" method="post">
+    <form action="/gallery/{{ folder }}/rename" method="post" class="ajax-form ajax-rename-folder">
       <label>Rename folder: <input name="new_name" placeholder="New name"></label>
       <button type="submit">Rename</button>
     </form>
-    <form action="/gallery/{{ folder }}/delete" method="post" onsubmit="return confirm('Delete folder and all images?')">
+    <form action="/gallery/{{ folder }}/delete" method="post" class="ajax-form ajax-delete-folder" onsubmit="return confirm('Delete folder and all images?')">
       <button type="submit">Delete folder</button>
     </form>
     {% if images %}
       <div class="grid">
       {% for img in images %}
         <figure>
-          <a href="{{ img.url }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
-          <form action="/gallery/{{ folder }}/delete_image" method="post">
-            <input type="hidden" name="filename" value="{{ img.name }}">
-            <button type="submit">Remove</button>
-          </form>
+          <a href="{{ img.url }}"><img src="{{ img.thumb if img.thumb else img.url }}" alt="{{ img.name }}"></a>
+          <div class="img-actions">
+            <button class="btn-exif" data-folder="{{ folder }}" data-filename="{{ img.name }}">EXIF</button>
+            <form action="/gallery/{{ folder }}/delete_image" method="post" class="ajax-form ajax-delete-image">
+              <input type="hidden" name="filename" value="{{ img.name }}">
+              <button type="submit">Remove</button>
+            </form>
+          </div>
         </figure>
       {% endfor %}
       </div>
@@ -31,7 +34,7 @@
     {% endif %}
   {% else %}
     <h1>Gallery</h1>
-    <form action="/gallery/create_folder" method="post">
+    <form action="/gallery/create_folder" method="post" class="ajax-form ajax-create-folder">
       <label>Create folder: <input name="name" placeholder="Folder name"></label>
       <button type="submit">Create</button>
     </form>
@@ -48,7 +51,7 @@
       <div class="grid">
       {% for img in images %}
         <figure>
-          <a href="{{ img.url }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
+          <a href="{{ img.url }}"><img src="{{ img.thumb if img.thumb else img.url }}" alt="{{ img.name }}"></a>
         </figure>
       {% endfor %}
       </div>
@@ -56,4 +59,8 @@
       <p>No images yet. <a href="/upload">Upload one</a>.</p>
     {% endif %}
   {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/gallery.js" defer></script>
 {% endblock %}
