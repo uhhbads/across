@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, UploadFile, File, Form, Depends, HTTPException
+from fastapi import APIRouter, Request, UploadFile, File, Form, Depends, HTTPException, Body
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -168,11 +168,15 @@ async def api_image_exif(folder: str = None, filename: str = None):
 
 
 @router.post('/api/create_folder')
-async def api_create_folder(payload: dict = None, name: str = Form(None)):
-    # accept JSON body or form
+async def api_create_folder(request: Request, name: str = Form(None)):
+    # Robustly accept JSON body or form data
     folder_name = None
-    if payload and isinstance(payload, dict):
-        folder_name = payload.get('name')
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            folder_name = body.get('name')
+    except Exception:
+        folder_name = None
     if not folder_name:
         folder_name = name
     if not folder_name:
@@ -183,10 +187,14 @@ async def api_create_folder(payload: dict = None, name: str = Form(None)):
 
 
 @router.post('/api/delete_folder')
-async def api_delete_folder(payload: dict = None, folder: str = Form(None)):
+async def api_delete_folder(request: Request, folder: str = Form(None)):
     folder_name = None
-    if payload and isinstance(payload, dict):
-        folder_name = payload.get('folder')
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            folder_name = body.get('folder')
+    except Exception:
+        folder_name = None
     if not folder_name:
         folder_name = folder
     if not folder_name:
@@ -204,12 +212,17 @@ async def api_delete_folder(payload: dict = None, folder: str = Form(None)):
 
 
 @router.post('/api/delete_image')
-async def api_delete_image(payload: dict = None, folder: str = Form(None), filename: str = Form(None)):
+async def api_delete_image(request: Request, folder: str = Form(None), filename: str = Form(None)):
     folder_name = None
     file_name = None
-    if payload and isinstance(payload, dict):
-        folder_name = payload.get('folder')
-        file_name = payload.get('filename')
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            folder_name = body.get('folder')
+            file_name = body.get('filename')
+    except Exception:
+        folder_name = None
+        file_name = None
     folder_name = folder_name or folder
     file_name = file_name or filename
     if not file_name:
@@ -226,3 +239,26 @@ async def api_delete_image(payload: dict = None, folder: str = Form(None), filen
     except Exception:
         pass
     return {"ok": True}
+
+
+@router.post('/debug/echo')
+async def debug_echo(request: Request):
+    # Return raw body, parsed JSON (if any), form data and headers to help debugging clients
+    body_bytes = await request.body()
+    content_type = request.headers.get('content-type')
+    try:
+        json_body = await request.json()
+    except Exception:
+        json_body = None
+    try:
+        form = await request.form()
+        form_dict = dict(form)
+    except Exception:
+        form_dict = None
+    return {
+        'content_type': content_type,
+        'raw': body_bytes.decode('utf-8', errors='replace'),
+        'json': json_body,
+        'form': form_dict,
+        'headers': dict(request.headers)
+    }
