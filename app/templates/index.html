@@ -18,7 +18,7 @@
       <div class="grid">
       {% for img in images %}
         <figure>
-          <a href="{{ img.url }}" class="img-link" data-full="{{ img.url }}" data-filename="{{ img.name }}" data-folder="{{ folder or '' }}"><img src="{{ img.thumb if img.thumb else img.url }}" alt="{{ img.name }}"></a>
+          <a href="{{ img.url }}" class="img-link" data-full="{{ img.url }}" data-filename="{{ img.name }}" data-folder="{{ folder or '' }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
           <div class="img-actions">
             <button class="btn-exif" data-folder="{{ folder }}" data-filename="{{ img.name }}">EXIF</button>
             <form action="/gallery/{{ folder }}/delete_image" method="post" class="ajax-form ajax-delete-image">
@@ -40,18 +40,25 @@
     </form>
     {% if folders %}
       <h2>Folders</h2>
-      <ul>
+      <div class="folder-list">
         {% for f in folders %}
-          <li><a href="/gallery?folder={{ f.name }}">{{ f.name }}</a></li>
+          <div class="folder-card">
+            <a href="/gallery?folder={{ f.name }}">{{ f.name }}</a>
+            <div class="folder-preview">
+              {% for p in f.previews %}
+                <a href="/gallery?folder={{ f.name }}" class="preview-link"><img src="{{ p.url }}" alt="{{ p.name }}"></a>
+              {% endfor %}
+            </div>
+          </div>
         {% endfor %}
-      </ul>
+      </div>
     {% endif %}
     {% if images %}
       <h2>Root images</h2>
       <div class="grid">
       {% for img in images %}
         <figure>
-          <a href="{{ img.url }}" class="img-link" data-full="{{ img.url }}" data-filename="{{ img.name }}" data-folder=""><img src="{{ img.thumb if img.thumb else img.url }}" alt="{{ img.name }}"></a>
+          <a href="{{ img.url }}" class="img-link" data-full="{{ img.url }}" data-filename="{{ img.name }}" data-folder=""><img src="{{ img.url }}" alt="{{ img.name }}"></a>
         </figure>
       {% endfor %}
       </div>

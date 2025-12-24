@@ -21,3 +21,9 @@ main{padding:16px}
 #exif-modal{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center}
 #exif-modal .modal-inner{background:#fff;padding:16px;border-radius:6px;max-width:800px;max-height:80vh;overflow:auto}
 #exif-modal pre{white-space:pre-wrap}
+
+/* Folder preview styling */
+.folder-list{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
+.folder-card{border:1px solid #eee;padding:8px;border-radius:6px;width:200px}
+.folder-card .folder-preview{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.folder-card .folder-preview img{width:88px;height:60px;object-fit:cover;border-radius:4px}

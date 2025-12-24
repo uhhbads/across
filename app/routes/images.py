@@ -8,15 +8,13 @@ import mimetypes
 import os
 from app.config import DATA_DIR
 
-# optional Pillow import for thumbnails/EXIF
+# optional Pillow import for EXIF
 try:
     from PIL import Image
     from PIL.ExifTags import TAGS
-    _PIL_AVAILABLE = True
 except Exception:
     Image = None
     TAGS = {}
-    _PIL_AVAILABLE = False
 
 router = APIRouter()
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,8 +37,7 @@ async def gallery(request: Request, folder: str = None):
             if p.is_file():
                 mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
                 if mime.startswith("image/"):
-                        thumb = f"/images/{folder}/thumbs/{p.name}"
-                        files.append({"name": p.name, "url": f"/images/{folder}/{p.name}", "thumb": thumb})
+                    files.append({"name": p.name, "url": f"/images/{folder}/{p.name}"})
         files.sort(key=lambda x: x["name"], reverse=True)
         context.update({"images": files, "folder": folder})
         return templates.TemplateResponse("index.html", context)
@@ -50,7 +47,19 @@ async def gallery(request: Request, folder: str = None):
     images = []
     for p in images_dir.iterdir():
         if p.is_dir():
-            folders.append({"name": p.name})
+            # build a small preview list of up to 4 images inside the folder
+            previews = []
+            try:
+                for q in sorted(p.iterdir()):
+                    if q.is_file():
+                        mime = mimetypes.guess_type(q.name)[0] or "application/octet-stream"
+                        if mime.startswith("image/"):
+                            previews.append({"name": q.name, "url": f"/images/{p.name}/{q.name}"})
+                            if len(previews) >= 4:
+                                break
+            except Exception:
+                previews = []
+            folders.append({"name": p.name, "previews": previews})
         elif p.is_file():
             mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
             if mime.startswith("image/"):
@@ -78,19 +87,7 @@ async def upload_image(file: UploadFile = File(...), title: str = Form(None), fo
     dest = dest_dir / fname
     with dest.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    # create thumbnail if pillow available
-    try:
-        if _PIL_AVAILABLE:
-            thumbs_dir = dest_dir / "thumbs"
-            thumbs_dir.mkdir(parents=True, exist_ok=True)
-            thumb_path = thumbs_dir / fname
-            with Image.open(dest) as img:
-                img.thumbnail((480, 320))
-                # save in same format if possible
-                img.save(thumb_path)
-    except Exception:
-        pass
-
+    # (No thumbnail generation) -- previews use full images scaled in the client
     if folder:
         return RedirectResponse(url=f"/gallery?folder={folder}", status_code=303)
     return RedirectResponse(url="/gallery", status_code=303)
@@ -143,7 +140,7 @@ async def delete_image(folder: str, filename: str = Form(...)):
 
 
 def _read_exif(path: Path):
-    if not _PIL_AVAILABLE:
+    if Image is None:
         return {}
     try:
         with Image.open(path) as img:
@@ -231,13 +228,6 @@ async def api_delete_image(request: Request, folder: str = Form(None), filename:
     if not path.exists() or not path.is_file():
         return {"ok": False, "error": "not found"}
     path.unlink()
-    # remove thumbnail if exists
-    try:
-        thumbs = path.parent / 'thumbs' / path.name
-        if thumbs.exists():
-            thumbs.unlink()
-    except Exception:
-        pass
     return {"ok": True}
 
 
@@ -277,15 +267,7 @@ async def api_rename_image(request: Request, folder: str = Form(None), old_name:
     try:
         src.rename(dst)
         # rename thumbnail if exists
-        try:
-            thumbs_dir = src.parent / 'thumbs'
-            if thumbs_dir.exists():
-                old_thumb = thumbs_dir / src.name
-                if old_thumb.exists():
-                    new_thumb = thumbs_dir / dst.name
-                    old_thumb.rename(new_thumb)
-        except Exception:
-            pass
+        # (no thumbnails present) nothing else to rename
         return {"ok": True, "new_name": dst.name}
     except Exception as e:
         return {"ok": False, "error": str(e)}

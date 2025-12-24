@@ -1,4 +1,4 @@
-Aperture — Image-dump + AI-agent boilerplate
+across — Image-dump + AI-agent boilerplate
 
 Quick start
 
