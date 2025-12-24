@@ -19,7 +19,20 @@ document.addEventListener('DOMContentLoaded', ()=>{
         body: JSON.stringify({message: text})
       })
       const j = await res.json()
-      await revealText(loadingEl, j.reply)
+      // If action_result present, show the human-friendly reply and a compact JSON summary
+      if(j.action_result){
+        await revealText(loadingEl, j.reply)
+        // show details line
+        const details = document.createElement('div')
+        details.className = 'agent-details'
+        const summary = document.createElement('pre')
+        summary.textContent = JSON.stringify(j.action_result, null, 2)
+        details.appendChild(summary)
+        loadingEl.parentNode.appendChild(details)
+        box.scrollTop = box.scrollHeight
+      } else {
+        await revealText(loadingEl, j.reply)
+      }
     }catch(err){
       loadingEl.innerHTML = escapeHtml('Error: '+err.message)
       loadingEl.classList.remove('loading')

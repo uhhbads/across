@@ -27,3 +27,7 @@ main{padding:16px}
 .folder-card{border:1px solid #eee;padding:8px;border-radius:6px;width:200px}
 .folder-card .folder-preview{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .folder-card .folder-preview img{width:88px;height:60px;object-fit:cover;border-radius:4px}
+
+/* Action result details in chat console */
+.agent-details{margin-left:12px;margin-top:6px;background:#fafafa;border-left:3px solid #eee;padding:8px;border-radius:4px;font-size:12px}
+.agent-details pre{margin:0;white-space:pre-wrap;font-family:monospace}
