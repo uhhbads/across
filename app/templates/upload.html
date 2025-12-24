@@ -4,6 +4,12 @@
   <h1>Upload Image</h1>
   <form action="/upload" method="post" enctype="multipart/form-data">
     <label>Image: <input type="file" name="file" accept="image/*" required></label>
+    {% if folder %}
+      <input type="hidden" name="folder" value="{{ folder }}">
+      <p>Uploading to folder: <strong>{{ folder }}</strong></p>
+    {% else %}
+      <p>Uploading to root images folder.</p>
+    {% endif %}
     <button type="submit">Upload</button>
   </form>
 {% endblock %}

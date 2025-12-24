@@ -1,16 +1,59 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <h1>Gallery</h1>
-  {% if images %}
-    <div class="grid">
-    {% for img in images %}
-      <figure>
-        <a href="{{ img.url }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
-      </figure>
-    {% endfor %}
-    </div>
+  {% if folder %}
+    <h1>Folder: {{ folder }}</h1>
+    <p><a href="/gallery">← Back to gallery</a></p>
+    <p>
+      <a href="/upload?folder={{ folder }}">Upload to {{ folder }}</a>
+    </p>
+    <form action="/gallery/{{ folder }}/rename" method="post">
+      <label>Rename folder: <input name="new_name" placeholder="New name"></label>
+      <button type="submit">Rename</button>
+    </form>
+    <form action="/gallery/{{ folder }}/delete" method="post" onsubmit="return confirm('Delete folder and all images?')">
+      <button type="submit">Delete folder</button>
+    </form>
+    {% if images %}
+      <div class="grid">
+      {% for img in images %}
+        <figure>
+          <a href="{{ img.url }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
+          <form action="/gallery/{{ folder }}/delete_image" method="post">
+            <input type="hidden" name="filename" value="{{ img.name }}">
+            <button type="submit">Remove</button>
+          </form>
+        </figure>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p>No images in this folder yet.</p>
+    {% endif %}
   {% else %}
-    <p>No images yet. <a href="/upload">Upload one</a>.</p>
+    <h1>Gallery</h1>
+    <form action="/gallery/create_folder" method="post">
+      <label>Create folder: <input name="name" placeholder="Folder name"></label>
+      <button type="submit">Create</button>
+    </form>
+    {% if folders %}
+      <h2>Folders</h2>
+      <ul>
+        {% for f in folders %}
+          <li><a href="/gallery?folder={{ f.name }}">{{ f.name }}</a></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if images %}
+      <h2>Root images</h2>
+      <div class="grid">
+      {% for img in images %}
+        <figure>
+          <a href="{{ img.url }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
+        </figure>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p>No images yet. <a href="/upload">Upload one</a>.</p>
+    {% endif %}
   {% endif %}
 {% endblock %}
