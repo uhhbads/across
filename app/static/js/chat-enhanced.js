@@ -19,8 +19,43 @@ document.addEventListener('DOMContentLoaded', ()=>{
         body: JSON.stringify({message: text})
       })
       const j = await res.json()
-      // If action_result present, show the human-friendly reply and a compact JSON summary
-      if(j.action_result){
+      // If preview is returned, show preview UI and confirm button
+      if(j.requires_confirmation && j.raw_action){
+        await revealText(loadingEl, j.reply)
+        const previewBox = document.createElement('div')
+        previewBox.className = 'agent-details'
+        const pre = document.createElement('pre')
+        pre.textContent = JSON.stringify(j.preview, null, 2)
+        previewBox.appendChild(pre)
+        const btn = document.createElement('button')
+        btn.textContent = 'Confirm and Execute'
+        btn.style.marginTop = '6px'
+        btn.addEventListener('click', async ()=>{
+          btn.disabled = true
+          btn.textContent = 'Executing...'
+          try{
+            const execRes = await fetch('/agent/chat', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({message: text, confirm: true, action: j.raw_action})
+            })
+            const execJson = await execRes.json()
+            const execDetails = document.createElement('div')
+            execDetails.className = 'agent-details'
+            const execPre = document.createElement('pre')
+            execPre.textContent = JSON.stringify(execJson.action_result || execJson, null, 2)
+            execDetails.appendChild(execPre)
+            previewBox.parentNode.appendChild(execDetails)
+            // show executed reply
+            await revealText(loadingEl, execJson.reply || 'Done')
+            saveHistory()
+          }catch(err){
+            btn.textContent = 'Error'
+          }
+        })
+        previewBox.appendChild(btn)
+        loadingEl.parentNode.appendChild(previewBox)
+        box.scrollTop = box.scrollHeight
+      } else if(j.action_result){
         await revealText(loadingEl, j.reply)
         // show details line
         const details = document.createElement('div')
@@ -57,6 +92,42 @@ document.addEventListener('DOMContentLoaded', ()=>{
     box.scrollTop = box.scrollHeight
     return textNode
   }
+
+  // Persist chat history to localStorage
+  function loadHistory(){
+    try{
+      const raw = localStorage.getItem('chat_history')
+      if(!raw) return
+      const items = JSON.parse(raw)
+      for(const it of items){
+        append(it.who, it.text)
+        if(it.details){
+          const details = document.createElement('div')
+          details.className = 'agent-details'
+          const pre = document.createElement('pre')
+          pre.textContent = JSON.stringify(it.details, null, 2)
+          details.appendChild(pre)
+          box.appendChild(details)
+        }
+      }
+    }catch(e){console.warn('failed to load chat history', e)}
+  }
+
+  function saveHistory(){
+    try{
+      const nodes = box.querySelectorAll('.msg')
+      const out = []
+      for(const n of nodes){
+        const who = n.querySelector('.user') ? n.querySelector('.user').textContent.replace(':','') : 'Agent'
+        const text = n.querySelector('.text') ? n.querySelector('.text').textContent : ''
+        out.push({who, text})
+      }
+      localStorage.setItem('chat_history', JSON.stringify(out))
+    }catch(e){console.warn('failed to save chat history', e)}
+  }
+
+  // load saved history on start
+  loadHistory()
 
   // reveal text char-by-char in the given element
   function revealText(el, text){

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from typing import Optional, Any
 import os
 import re
 import json
@@ -27,7 +28,50 @@ IMAGES_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 class ChatRequest(BaseModel):
-    message: str
+    message: Optional[str] = ""
+    confirm: Optional[bool] = False
+    action: Optional[Any] = None
+
+
+def summarize_action(action: dict):
+    # Non-destructive preview of what the action would do
+    intent = action.get('intent')
+    # folder move preview
+    src_folder = action.get('source_folder') or action.get('source')
+    target = action.get('target_folder') or action.get('target')
+    if src_folder and target:
+        sf = _sanitize_folder_name(src_folder)
+        if not sf:
+            return {"ok": False, "message": "invalid source folder"}
+        src_dir = IMAGES_ROOT / sf
+        if not src_dir.exists() or not src_dir.is_dir():
+            return {"ok": False, "message": f"source folder not found: {sf}"}
+        count = sum(1 for _ in src_dir.iterdir() if _.is_file())
+        return {"ok": True, "preview": {"move_count": count, "source": f"/{sf}", "target": f"/{_sanitize_folder_name(target)}"}}
+
+    if intent == 'move_image' or intent == 'move':
+        query = action.get('query', '')
+        matches = find_images_by_query(query)
+        return {"ok": True, "preview": {"move_count": len(matches), "sample": matches[:10]}}
+
+    if intent in ('delete_folder', 'remove_folder', 'rmdir'):
+        folder = action.get('folder') or action.get('source_folder')
+        sf = _sanitize_folder_name(folder)
+        if not sf:
+            return {"ok": False, "message": "invalid folder"}
+        target_dir = IMAGES_ROOT / sf
+        if not target_dir.exists():
+            return {"ok": False, "message": "folder not found"}
+        count = sum(1 for _ in target_dir.rglob('*') if _.is_file())
+        return {"ok": True, "preview": {"deleted_files": count, "folder": f"/{sf}"}}
+
+    # default: for rename/delete by query, show matches
+    if intent in ('delete_image', 'delete', 'rename_image', 'rename'):
+        query = action.get('query', '')
+        if query:
+            matches = find_images_by_query(query)
+            return {"ok": True, "preview": {"matched": len(matches), "sample": matches[:10]}}
+    return {"ok": True, "preview": {}}
 
 
 @router.get("/chat", response_class=HTMLResponse)
@@ -250,43 +294,29 @@ async def chat_endpoint(req: ChatRequest):
             # try to extract JSON action from model reply
             action_json = extract_json(content)
             if action_json is None:
-                # return model text as fallback
                 return JSONResponse({"reply": content, "action_result": {"ok": False, "message": "No JSON action found"}})
 
-            # perform the action
-            action_result = perform_action(action_json)
-
-            # human readable message
-            human = None
-            if action_result.get('ok'):
-                # folder-source move readable message
-                if action_result.get('source') and action_result.get('target'):
-                    human = f"✅ Moved {action_result.get('moved',0)} images from {action_result.get('source')} to {action_result.get('target')}"
-                # folder delete readable message
-                elif action_result.get('folder') and 'deleted_files' in action_result:
-                    df = action_result.get('deleted_files', 0)
-                    if df:
-                        human = f"✅ Removed folder {action_result.get('folder')} and deleted {df} files"
+            # If client asked to confirm/execute (sent confirm + action), perform that
+            if req.confirm and req.action:
+                # execute provided action
+                executed = perform_action(req.action)
+                # build human message
+                if executed.get('ok'):
+                    human = None
+                    if executed.get('source') and executed.get('target'):
+                        human = f"✅ Moved {executed.get('moved',0)} images from {executed.get('source')} to {executed.get('target')}"
+                    elif executed.get('folder') and 'deleted_files' in executed:
+                        df = executed.get('deleted_files', 0)
+                        human = f"✅ Removed folder {executed.get('folder')} (deleted {df} files)" if df else f"✅ Removed empty folder {executed.get('folder')}"
                     else:
-                        human = f"✅ Removed empty folder {action_result.get('folder')}"
+                        human = f"✅ Action executed"
                 else:
-                    # fall through to existing per-intent messages
-                    if action_json.get('intent') in ('move_image', 'move'):
-                        human = f"✅ Moved {action_result.get('moved',0)} images to {action_result.get('target')}"
-                    elif action_json.get('intent') in ('rename_image','rename'):
-                        human = f"✅ Renamed image to {action_result.get('new_name')}"
-                    elif action_json.get('intent') in ('delete_image','delete'):
-                        human = f"✅ Deleted {action_result.get('deleted',0)} images"
-                    elif action_json.get('intent') in ('tag','tag_image'):
-                        human = f"✅ Tagged {action_result.get('tagged',0)} images with {action_result.get('tags')}"
-                    elif action_json.get('intent') in ('summarize','summary'):
-                        human = f"📊 Found {action_result.get('count',0)} images"
-                    else:
-                        human = "✅ Action completed"
-            else:
-                human = f"❌ Action failed: {action_result.get('message') or action_result}"
+                    human = f"❌ Action failed: {executed.get('message') or executed}"
+                return JSONResponse({"reply": human, "action_result": executed, "raw_action": req.action})
 
-            return JSONResponse({"reply": human, "action_result": action_result, "raw_action": action_json})
+            # Otherwise, return a preview (do NOT execute)
+            preview = summarize_action(action_json)
+            return JSONResponse({"reply": "Preview generated. Confirm to execute.", "raw_action": action_json, "preview": preview, "requires_confirmation": True})
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
