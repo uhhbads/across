@@ -66,8 +66,23 @@
       <p>No images yet. <a href="/upload">Upload one</a>.</p>
     {% endif %}
   {% endif %}
+  <!-- AI chat widget (bottom-right) -->
+  <div id="ai-chat-widget" style="position:fixed;right:12px;bottom:12px;width:320px;z-index:9999">
+    <div class="ai-widget" style="box-shadow:0 6px 18px rgba(0,0,0,0.12);border-radius:8px;overflow:hidden;background:#fff">
+      <div style="background:#222;color:#fff;padding:8px;font-weight:bold">Assistant</div>
+      <div id="chatbox" style="height:200px;overflow:auto;padding:8px"></div>
+      <form id="chatForm" style="display:flex;padding:8px;border-top:1px solid #eee">
+        <input id="msg" placeholder="Ask the assistant..." autocomplete="off" style="flex:1;padding:6px;margin-right:6px">
+        <button type="submit">Send</button>
+      </form>
+      <div style="padding:8px;border-top:1px solid #f1f1f1;text-align:right">
+        <button id="undoAiBtn" style="font-size:12px">Undo last AI action</button>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
   <script src="/static/js/gallery.js" defer></script>
 {% endblock %}
+ 

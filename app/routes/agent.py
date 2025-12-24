@@ -9,6 +9,8 @@ import json
 import shutil
 from pathlib import Path
 from app.config import OPENAI_API_KEY, BASE_DIR as PROJECT_ROOT
+import uuid
+import datetime
 
 # Try to import the OpenAI client; if unavailable we'll fallback to a placeholder reply
 try:
@@ -25,6 +27,9 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # images root
 IMAGES_ROOT = Path(os.getenv('DATA_DIR', PROJECT_ROOT / 'data')) / 'images'
 IMAGES_ROOT.mkdir(parents=True, exist_ok=True)
+LOG_FILE = IMAGES_ROOT / '.ai_action_log.jsonl'
+TRASH_DIR = IMAGES_ROOT / '.trash'
+TRASH_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class ChatRequest(BaseModel):
@@ -130,6 +135,14 @@ def perform_action(action: dict):
     # action is expected to have keys: intent, query, target_folder, filename, tags, etc.
     intent = action.get('intent')
     result = {"ok": False, "message": "unknown action"}
+    # helper to append action log
+    def _log(entry: dict):
+        entry.setdefault('ts', datetime.datetime.utcnow().isoformat() + 'Z')
+        try:
+            with LOG_FILE.open('a', encoding='utf8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        except Exception:
+            pass
     # If action defines a source_folder and target_folder, move all files from source -> target
     src_folder = action.get('source_folder') or action.get('source')
     target = action.get('target_folder') or action.get('target')
@@ -144,14 +157,19 @@ def perform_action(action: dict):
         dst_dir = IMAGES_ROOT / tf
         dst_dir.mkdir(parents=True, exist_ok=True)
         moved = 0
+        moved_items = []
         for p in src_dir.iterdir():
             if p.is_file():
                 try:
-                    shutil.move(str(p), str(dst_dir / p.name))
+                    dstp = dst_dir / p.name
+                    shutil.move(str(p), str(dstp))
                     moved += 1
+                    moved_items.append({"src": str(p.relative_to(IMAGES_ROOT)), "dst": str(dstp.relative_to(IMAGES_ROOT))})
                 except Exception:
                     pass
-        return {"ok": True, "moved": moved, "target": f"/{tf}", "source": f"/{sf}"}
+        res = {"ok": True, "moved": moved, "target": f"/{tf}", "source": f"/{sf}", "items": moved_items}
+        _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "move", "items": [{"src": i["dst"], "dst": i["src"]} for i in moved_items]}})
+        return res
 
     if intent == 'move_image' or intent == 'move':
         query = action.get('query', '')
@@ -160,6 +178,7 @@ def perform_action(action: dict):
             return {"ok": False, "message": "missing target_folder"}
         matches = find_images_by_query(query)
         moved = 0
+        moved_items = []
         for rel in matches:
             src = IMAGES_ROOT / rel
             dst_dir = IMAGES_ROOT / target.strip('/').lstrip('/')
@@ -168,9 +187,12 @@ def perform_action(action: dict):
             try:
                 shutil.move(str(src), str(dst))
                 moved += 1
+                moved_items.append({"src": str(src.relative_to(IMAGES_ROOT)), "dst": str(dst.relative_to(IMAGES_ROOT))})
             except Exception:
                 pass
-        return {"ok": True, "moved": moved, "target": target}
+        res = {"ok": True, "moved": moved, "target": target, "items": moved_items}
+        _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "move", "items": [{"src": i["dst"], "dst": i["src"]} for i in moved_items]}})
+        return res
 
     if intent == 'rename_image' or intent == 'rename':
         folder = action.get('folder')
@@ -182,7 +204,9 @@ def perform_action(action: dict):
         dst = IMAGES_ROOT / new if not folder else IMAGES_ROOT / folder.strip('/') / new
         try:
             src.rename(dst)
-            return {"ok": True, "new_name": str(dst.relative_to(IMAGES_ROOT))}
+            res = {"ok": True, "new_name": str(dst.relative_to(IMAGES_ROOT))}
+            _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "rename", "old": str(dst.relative_to(IMAGES_ROOT)), "new": str(src.relative_to(IMAGES_ROOT))}})
+            return res
         except Exception as e:
             return {"ok": False, "message": str(e)}
 
@@ -190,14 +214,21 @@ def perform_action(action: dict):
         query = action.get('query', '')
         matches = find_images_by_query(query)
         deleted = 0
+        moved_to_trash = []
+        trash_bucket = TRASH_DIR / (datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S') + '_' + str(uuid.uuid4()))
+        trash_bucket.mkdir(parents=True, exist_ok=True)
         for rel in matches:
             p = IMAGES_ROOT / rel
             try:
-                p.unlink()
+                dst = trash_bucket / p.name
+                shutil.move(str(p), str(dst))
                 deleted += 1
+                moved_to_trash.append({"src": str(rel), "trash": str(dst.relative_to(IMAGES_ROOT))})
             except Exception:
                 pass
-        return {"ok": True, "deleted": deleted}
+        res = {"ok": True, "deleted": deleted, "trash_bucket": str(trash_bucket.relative_to(IMAGES_ROOT)), "items": moved_to_trash}
+        _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "restore_trash", "bucket": str(trash_bucket.relative_to(IMAGES_ROOT)), "items": moved_to_trash}})
+        return res
 
     if intent == 'tag' or intent == 'tag_image':
         # store tags in a tags.json in IMAGES_ROOT
@@ -220,7 +251,9 @@ def perform_action(action: dict):
             tags_file.write_text(json.dumps(data, indent=2))
         except Exception:
             pass
-        return {"ok": True, "tagged": len(matches), "tags": tags}
+        res = {"ok": True, "tagged": len(matches), "tags": tags}
+        _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "tags", "previous": {}}})
+        return res
 
     if intent == 'summarize' or intent == 'summary':
         query = action.get('query', '')
@@ -240,17 +273,22 @@ def perform_action(action: dict):
             return {"ok": False, "message": f"folder not found: {sf}"}
         recursive = bool(action.get('recursive', False))
         if recursive:
-            # count files for reporting
-            count = sum(1 for _ in target_dir.rglob('*') if _.is_file())
+            # move folder into trash for possible restore
+            trash_bucket = TRASH_DIR / (datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S') + '_' + str(uuid.uuid4()))
             try:
-                shutil.rmtree(target_dir)
-                return {"ok": True, "deleted_files": count, "folder": f"/{sf}"}
+                shutil.move(str(target_dir), str(trash_bucket))
+                count = sum(1 for _ in trash_bucket.rglob('*') if _.is_file())
+                res = {"ok": True, "deleted_files": count, "folder": f"/{sf}", "trash_bucket": str(trash_bucket.relative_to(IMAGES_ROOT))}
+                _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "restore_trash_folder", "bucket": str(trash_bucket.relative_to(IMAGES_ROOT))}})
+                return res
             except Exception as e:
                 return {"ok": False, "message": str(e)}
         else:
             try:
                 target_dir.rmdir()
-                return {"ok": True, "deleted_files": 0, "folder": f"/{sf}"}
+                res = {"ok": True, "deleted_files": 0, "folder": f"/{sf}"}
+                _log({"id": str(uuid.uuid4()), "action": action, "result": res, "inverse": {"type": "remove_folder_empty", "folder": f"/{sf}"}})
+                return res
             except Exception as e:
                 return {"ok": False, "message": "folder not empty or cannot remove: " + str(e)}
 
@@ -325,4 +363,112 @@ async def chat_endpoint(req: ChatRequest):
     return JSONResponse({
         "reply": f"Agent placeholder: I heard '{user_msg}'. (Set OPENAI_API_KEY and install 'openai' to enable real AI.)"
     })
+
+
+@router.post('/agent/undo')
+async def agent_undo():
+    # read log lines
+    if not LOG_FILE.exists():
+        return JSONResponse({"ok": False, "message": "no action log found"})
+    try:
+        with LOG_FILE.open('r', encoding='utf8') as f:
+            lines = [json.loads(l) for l in f.read().splitlines() if l.strip()]
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"failed to read log: {e}"})
+
+    # find last actionable entry with inverse and not yet undone
+    candidate = None
+    for entry in reversed(lines):
+        if 'inverse' in entry:
+            # check if undone
+            orig_id = entry.get('id')
+            already = any((l.get('type') == 'undo' and l.get('undo_of') == orig_id) or (l.get('undo_of') == orig_id) for l in lines)
+            if not already:
+                candidate = entry
+                break
+    if not candidate:
+        return JSONResponse({"ok": False, "message": "no undoable actions found"})
+
+    inv = candidate.get('inverse')
+    undo_result = {"ok": False, "message": "unknown inverse"}
+    try:
+        itype = inv.get('type')
+        if itype == 'move':
+            restored = 0
+            for it in inv.get('items', []):
+                src = IMAGES_ROOT / it['src']
+                dst = IMAGES_ROOT / it['dst']
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if src.exists():
+                    shutil.move(str(src), str(dst))
+                    restored += 1
+            undo_result = {"ok": True, "restored": restored}
+
+        elif itype == 'rename':
+            old = Path(inv.get('old'))
+            new = Path(inv.get('new'))
+            src = IMAGES_ROOT / old
+            dst = IMAGES_ROOT / new
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.exists():
+                shutil.move(str(src), str(dst))
+                undo_result = {"ok": True, "restored": str(dst.relative_to(IMAGES_ROOT))}
+            else:
+                undo_result = {"ok": False, "message": "file not found"}
+
+        elif itype in ('restore_trash', 'restore_trash_folder'):
+            bucket = inv.get('bucket')
+            bucket_path = IMAGES_ROOT / bucket
+            restored = 0
+            if bucket_path.exists():
+                # if items provided, restore individually
+                for it in inv.get('items', []):
+                    trashp = IMAGES_ROOT / it.get('trash')
+                    orig = IMAGES_ROOT / it.get('src')
+                    orig.parent.mkdir(parents=True, exist_ok=True)
+                    if trashp.exists():
+                        shutil.move(str(trashp), str(orig))
+                        restored += 1
+                # if folder restore, move bucket to original location if possible
+                if itype == 'restore_trash_folder':
+                    # attempt move bucket back to original folder name from candidate.action.folder
+                    orig_folder = candidate.get('action', {}).get('folder')
+                    if orig_folder:
+                        sf = _sanitize_folder_name(orig_folder)
+                        if sf:
+                            dest = IMAGES_ROOT / sf
+                            if not dest.exists():
+                                shutil.move(str(bucket_path), str(dest))
+                                undo_result = {"ok": True, "restored_folder": f"/{sf}"}
+                            else:
+                                undo_result = {"ok": False, "message": "destination exists"}
+                        else:
+                            undo_result = {"ok": False, "message": "invalid original folder"}
+                    else:
+                        undo_result = {"ok": False, "message": "no original folder info"}
+                else:
+                    # cleanup empty bucket
+                    try:
+                        if bucket_path.exists() and not any(bucket_path.iterdir()):
+                            bucket_path.rmdir()
+                    except Exception:
+                        pass
+                    undo_result = {"ok": True, "restored": restored}
+            else:
+                undo_result = {"ok": False, "message": "trash bucket not found"}
+
+        else:
+            undo_result = {"ok": False, "message": f"unsupported inverse type {itype}"}
+
+    except Exception as e:
+        undo_result = {"ok": False, "message": str(e)}
+
+    # append undo log
+    try:
+        with LOG_FILE.open('a', encoding='utf8') as f:
+            f.write(json.dumps({"id": str(uuid.uuid4()), "type": "undo", "undo_of": candidate.get('id'), "result": undo_result, "ts": datetime.datetime.utcnow().isoformat() + 'Z'}, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+
+    return JSONResponse(undo_result)
 

@@ -31,3 +31,9 @@ main{padding:16px}
 /* Action result details in chat console */
 .agent-details{margin-left:12px;margin-top:6px;background:#fafafa;border-left:3px solid #eee;padding:8px;border-radius:4px;font-size:12px}
 .agent-details pre{margin:0;white-space:pre-wrap;font-family:monospace}
+
+/* AI chat widget */
+#ai-chat-widget .ai-widget{width:100%;max-width:320px}
+#ai-chat-widget #chatbox{background:#fff;height:200px}
+#ai-chat-widget #chatForm input{border:1px solid #ddd;border-radius:4px}
+#ai-chat-widget button#undoAiBtn{background:#fff;border:1px solid #ddd;padding:6px 8px;border-radius:4px;cursor:pointer}

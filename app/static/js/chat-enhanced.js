@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   const form = document.getElementById('chatForm')
   const msgInput = document.getElementById('msg')
   const box = document.getElementById('chatbox')
+  if(!form || !box) return
   form.addEventListener('submit', async (e)=>{
     e.preventDefault()
     const text = msgInput.value.trim()
@@ -55,6 +56,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
         previewBox.appendChild(btn)
         loadingEl.parentNode.appendChild(previewBox)
         box.scrollTop = box.scrollHeight
+        saveHistory()
       } else if(j.action_result){
         await revealText(loadingEl, j.reply)
         // show details line
@@ -65,8 +67,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
         details.appendChild(summary)
         loadingEl.parentNode.appendChild(details)
         box.scrollTop = box.scrollHeight
+        saveHistory()
       } else {
         await revealText(loadingEl, j.reply)
+        saveHistory()
       }
     }catch(err){
       loadingEl.innerHTML = escapeHtml('Error: '+err.message)
@@ -128,6 +132,26 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   // load saved history on start
   loadHistory()
+
+  // undo button handler (if present)
+  const undoBtn = document.getElementById('undoAiBtn')
+  if(undoBtn){
+    undoBtn.addEventListener('click', async ()=>{
+      undoBtn.disabled = true
+      undoBtn.textContent = 'Undoing...'
+      try{
+        const res = await fetch('/agent/undo', {method:'POST'})
+        const j = await res.json()
+        append('Agent', j.ok ? (j.restored ? `✅ Restored ${j.restored}` : '✅ Undo completed') : `❌ ${j.message}`)
+        saveHistory()
+      }catch(e){
+        append('Agent', 'Error undoing: '+(e.message||e))
+      }finally{
+        undoBtn.disabled = false
+        undoBtn.textContent = 'Undo last AI action'
+      }
+    })
+  }
 
   // reveal text char-by-char in the given element
   function revealText(el, text){
