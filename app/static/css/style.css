@@ -10,3 +10,7 @@ main{padding:16px}
 #chatForm{display:flex}
 #chatForm input{flex:1;padding:8px}
 #chatForm button{padding:8px}
+
+/* Agent message styling and loading state */
+.msg.agent{background:#f7f7f9;padding:6px;border-radius:6px}
+.msg .text.loading{font-style:italic;color:#666}
