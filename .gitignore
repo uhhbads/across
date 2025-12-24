@@ -1,0 +1,10 @@
+# Virtual env
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Uploaded images/data
+data/
+.env

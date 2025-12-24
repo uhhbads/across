@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <h1>Gallery</h1>
+  {% if images %}
+    <div class="grid">
+    {% for img in images %}
+      <figure>
+        <a href="{{ img.url }}"><img src="{{ img.url }}" alt="{{ img.name }}"></a>
+      </figure>
+    {% endfor %}
+    </div>
+  {% else %}
+    <p>No images yet. <a href="/upload">Upload one</a>.</p>
+  {% endif %}
+{% endblock %}
