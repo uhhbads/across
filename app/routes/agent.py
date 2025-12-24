@@ -71,10 +71,44 @@ def find_images_by_query(query: str):
     return matches
 
 
+def _sanitize_folder_name(name: str):
+    if not name:
+        return None
+    s = str(name).replace('\\', '/').strip()
+    # disallow traversal
+    parts = [p for p in s.split('/') if p and p != '.']
+    if any(p == '..' for p in parts):
+        return None
+    return '/'.join(parts)
+
+
 def perform_action(action: dict):
     # action is expected to have keys: intent, query, target_folder, filename, tags, etc.
     intent = action.get('intent')
     result = {"ok": False, "message": "unknown action"}
+    # If action defines a source_folder and target_folder, move all files from source -> target
+    src_folder = action.get('source_folder') or action.get('source')
+    target = action.get('target_folder') or action.get('target')
+    if src_folder and target:
+        sf = _sanitize_folder_name(src_folder)
+        tf = _sanitize_folder_name(target)
+        if not sf or not tf:
+            return {"ok": False, "message": "invalid folder name"}
+        src_dir = IMAGES_ROOT / sf
+        if not src_dir.exists() or not src_dir.is_dir():
+            return {"ok": False, "message": f"source folder not found: {sf}"}
+        dst_dir = IMAGES_ROOT / tf
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        moved = 0
+        for p in src_dir.iterdir():
+            if p.is_file():
+                try:
+                    shutil.move(str(p), str(dst_dir / p.name))
+                    moved += 1
+                except Exception:
+                    pass
+        return {"ok": True, "moved": moved, "target": f"/{tf}", "source": f"/{sf}"}
+
     if intent == 'move_image' or intent == 'move':
         query = action.get('query', '')
         target = action.get('target_folder')
@@ -149,7 +183,35 @@ def perform_action(action: dict):
         matches = find_images_by_query(query)
         return {"ok": True, "count": len(matches), "samples": matches[:10]}
 
+    # delete/remove folder
+    if intent in ('delete_folder', 'remove_folder', 'rmdir'):
+        folder = action.get('folder') or action.get('source_folder') or action.get('target_folder')
+        if not folder:
+            return {"ok": False, "message": "missing folder"}
+        sf = _sanitize_folder_name(folder)
+        if not sf:
+            return {"ok": False, "message": "invalid folder name"}
+        target_dir = IMAGES_ROOT / sf
+        if not target_dir.exists() or not target_dir.is_dir():
+            return {"ok": False, "message": f"folder not found: {sf}"}
+        recursive = bool(action.get('recursive', False))
+        if recursive:
+            # count files for reporting
+            count = sum(1 for _ in target_dir.rglob('*') if _.is_file())
+            try:
+                shutil.rmtree(target_dir)
+                return {"ok": True, "deleted_files": count, "folder": f"/{sf}"}
+            except Exception as e:
+                return {"ok": False, "message": str(e)}
+        else:
+            try:
+                target_dir.rmdir()
+                return {"ok": True, "deleted_files": 0, "folder": f"/{sf}"}
+            except Exception as e:
+                return {"ok": False, "message": "folder not empty or cannot remove: " + str(e)}
+
     return result
+
 
 
 @router.post("/agent/chat")
@@ -166,7 +228,9 @@ async def chat_endpoint(req: ChatRequest):
                 "Schema examples:\n"
                 "{\"intent\": \"move_image\", \"query\": \"screenshots december\", \"target_folder\": \"/school\"}\n"
                 "{\"intent\": \"rename_image\", \"old_name\": \"IMG_0001.png\", \"new_name\": \"receipt_dec1.png\"}\n"
-                "Allowed intents: move_image/move, rename_image/rename, tag/tag_image, delete_image/delete, summarize/summary."
+                "{\"source_folder\": \"Japan/Raw\", \"target_folder\": \"Japan/Edited\"}\n"
+                "{\"intent\": \"delete_folder\", \"folder\": \"OldTrips/2018\", \"recursive\": true}\n"
+                "Allowed intents: move_image/move, rename_image/rename, tag/tag_image, delete_image/delete, summarize/summary. You may also specify \"source_folder\" and \"target_folder\" to move entire folders, or intent \"delete_folder\" to remove a folder."
             )
             resp = client.chat.completions.create(
                 model=model,
@@ -195,18 +259,30 @@ async def chat_endpoint(req: ChatRequest):
             # human readable message
             human = None
             if action_result.get('ok'):
-                if action_json.get('intent') in ('move_image', 'move'):
-                    human = f"✅ Moved {action_result.get('moved',0)} images to {action_result.get('target')}"
-                elif action_json.get('intent') in ('rename_image','rename'):
-                    human = f"✅ Renamed image to {action_result.get('new_name')}"
-                elif action_json.get('intent') in ('delete_image','delete'):
-                    human = f"✅ Deleted {action_result.get('deleted',0)} images"
-                elif action_json.get('intent') in ('tag','tag_image'):
-                    human = f"✅ Tagged {action_result.get('tagged',0)} images with {action_result.get('tags')}"
-                elif action_json.get('intent') in ('summarize','summary'):
-                    human = f"📊 Found {action_result.get('count',0)} images"
+                # folder-source move readable message
+                if action_result.get('source') and action_result.get('target'):
+                    human = f"✅ Moved {action_result.get('moved',0)} images from {action_result.get('source')} to {action_result.get('target')}"
+                # folder delete readable message
+                elif action_result.get('folder') and 'deleted_files' in action_result:
+                    df = action_result.get('deleted_files', 0)
+                    if df:
+                        human = f"✅ Removed folder {action_result.get('folder')} and deleted {df} files"
+                    else:
+                        human = f"✅ Removed empty folder {action_result.get('folder')}"
                 else:
-                    human = "✅ Action completed"
+                    # fall through to existing per-intent messages
+                    if action_json.get('intent') in ('move_image', 'move'):
+                        human = f"✅ Moved {action_result.get('moved',0)} images to {action_result.get('target')}"
+                    elif action_json.get('intent') in ('rename_image','rename'):
+                        human = f"✅ Renamed image to {action_result.get('new_name')}"
+                    elif action_json.get('intent') in ('delete_image','delete'):
+                        human = f"✅ Deleted {action_result.get('deleted',0)} images"
+                    elif action_json.get('intent') in ('tag','tag_image'):
+                        human = f"✅ Tagged {action_result.get('tagged',0)} images with {action_result.get('tags')}"
+                    elif action_json.get('intent') in ('summarize','summary'):
+                        human = f"📊 Found {action_result.get('count',0)} images"
+                    else:
+                        human = "✅ Action completed"
             else:
                 human = f"❌ Action failed: {action_result.get('message') or action_result}"
 
